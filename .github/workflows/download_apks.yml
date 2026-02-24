@@ -1,0 +1,133 @@
+name: Download APKs to vendor_extra
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout vendor_extra
+        uses: actions/checkout@v4
+        with:
+          repository: WSIUHBERFG/vendor_extra
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: vendor_extra
+
+      - name: Install tools
+        run: |
+          sudo apt-get install -y wget curl python3 python3-pip
+          pip3 install requests
+
+      - name: Download Telegram
+        run: |
+          cd vendor_extra/prebuilt
+          # Telegram официальный сайт
+          wget -q "https://telegram.org/dl/android/apk" -O Telegram.apk
+          echo "Telegram: $(du -sh Telegram.apk)"
+
+      - name: Download YouTube
+        run: |
+          cd vendor_extra/prebuilt
+          # YouTube — последняя версия с uptodown
+          python3 - << 'EOF'
+          import requests, re, sys
+          headers = {'User-Agent': 'Mozilla/5.0 (Android 15; Mobile)'}
+          r = requests.get('https://youtube.en.uptodown.com/android/download', headers=headers)
+          urls = re.findall(r'https://dw\.uptodown\.com/dwn/[^"]+\.apk', r.text)
+          if urls:
+              apk = requests.get(urls[0], headers=headers)
+              with open('YouTube.apk', 'wb') as f:
+                  f.write(apk.content)
+              print(f"YouTube downloaded: {len(apk.content)//1024//1024}MB")
+          else:
+              print("YouTube URL not found, skipping")
+          EOF
+
+      - name: Download Yandex Music
+        run: |
+          cd vendor_extra/prebuilt
+          python3 - << 'EOF'
+          import requests, re
+          headers = {'User-Agent': 'Mozilla/5.0 (Android 15; Mobile)'}
+          r = requests.get('https://yandex-music.en.uptodown.com/android/download', headers=headers)
+          urls = re.findall(r'https://dw\.uptodown\.com/dwn/[^"]+\.apk', r.text)
+          if urls:
+              apk = requests.get(urls[0], headers=headers)
+              with open('YaMuzyka.apk', 'wb') as f:
+                  f.write(apk.content)
+              print(f"YaMuzyka downloaded: {len(apk.content)//1024//1024}MB")
+          else:
+              print("YaMuzyka URL not found, skipping")
+          EOF
+
+      - name: Download Kinopoisk
+        run: |
+          cd vendor_extra/prebuilt
+          python3 - << 'EOF'
+          import requests, re
+          headers = {'User-Agent': 'Mozilla/5.0 (Android 15; Mobile)'}
+          r = requests.get('https://kinopoisk.en.uptodown.com/android/download', headers=headers)
+          urls = re.findall(r'https://dw\.uptodown\.com/dwn/[^"]+\.apk', r.text)
+          if urls:
+              apk = requests.get(urls[0], headers=headers)
+              with open('Kinopoisk.apk', 'wb') as f:
+                  f.write(apk.content)
+              print(f"Kinopoisk downloaded: {len(apk.content)//1024//1024}MB")
+          else:
+              print("Kinopoisk URL not found, skipping")
+          EOF
+
+      - name: Download Grok
+        run: |
+          cd vendor_extra/prebuilt
+          python3 - << 'EOF'
+          import requests, re
+          headers = {'User-Agent': 'Mozilla/5.0 (Android 15; Mobile)'}
+          r = requests.get('https://grok.en.uptodown.com/android/download', headers=headers)
+          urls = re.findall(r'https://dw\.uptodown\.com/dwn/[^"]+\.apk', r.text)
+          if urls:
+              apk = requests.get(urls[0], headers=headers)
+              with open('Grok.apk', 'wb') as f:
+                  f.write(apk.content)
+              print(f"Grok downloaded: {len(apk.content)//1024//1024}MB")
+          else:
+              print("Grok URL not found, skipping")
+          EOF
+
+      - name: Download Claude
+        run: |
+          cd vendor_extra/prebuilt
+          python3 - << 'EOF'
+          import requests, re
+          headers = {'User-Agent': 'Mozilla/5.0 (Android 15; Mobile)'}
+          r = requests.get('https://claude-ai.en.uptodown.com/android/download', headers=headers)
+          urls = re.findall(r'https://dw\.uptodown\.com/dwn/[^"]+\.apk', r.text)
+          if urls:
+              apk = requests.get(urls[0], headers=headers)
+              with open('Claude.apk', 'wb') as f:
+                  f.write(apk.content)
+              print(f"Claude downloaded: {len(apk.content)//1024//1024}MB")
+          else:
+              print("Claude URL not found, skipping")
+          EOF
+
+      - name: Manual APKs notice
+        run: |
+          echo "========================================="
+          echo "Следующие APK нужно добавить ВРУЧНУЮ:"
+          echo "  - MTManager.apk (с официального сайта binmt.com)"
+          echo "  - HidemynameVPN.apk (с hidemy.name)"
+          echo "  - GCam.apk (BSG/Wichaya build для SM8450)"
+          echo "========================================="
+          ls -lah vendor_extra/prebuilt/
+
+      - name: Commit APKs to vendor_extra
+        run: |
+          cd vendor_extra
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add prebuilt/
+          git diff --cached --stat
+          git commit -m "Add prebuilt APKs" || echo "Nothing to commit"
+          git push
