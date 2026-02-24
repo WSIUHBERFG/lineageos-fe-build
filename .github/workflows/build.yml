@@ -1,0 +1,169 @@
+name: Build LineageOS FE for POCO F4 GT
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Clean build (удалить кэш)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 часов максимум
+
+    steps:
+      - name: Maximize disk space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Set up build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex \
+            g++-multilib gcc-multilib git git-lfs gnupg gperf \
+            imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev \
+            libelf-dev liblz4-tool libncurses5 libncurses5-dev \
+            libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop \
+            pngcrush rsync schedtool squashfs-tools xsltproc \
+            zip zlib1g-dev python3 python-is-python3 \
+            openjdk-17-jdk
+
+      - name: Set up ccache
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          ccache -M 10G
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-lineage-22.2-ingres-${{ github.run_number }}
+          restore-keys: |
+            ccache-lineage-22.2-ingres-
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/.local/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
+          chmod a+x ~/.local/bin/repo
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git config --global color.ui false
+
+      - name: Initialize LineageOS repo
+        run: |
+          mkdir -p ~/android/lineage
+          cd ~/android/lineage
+          repo init \
+            -u https://github.com/LineageOS/android.git \
+            -b lineage-22.2 \
+            --git-lfs \
+            --depth=1
+
+      - name: Add local manifests
+        run: |
+          mkdir -p ~/android/lineage/.repo/local_manifests
+          cat > ~/android/lineage/.repo/local_manifests/ingres.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <manifest>
+            <project name="LineageOS/android_device_xiaomi_ingres"
+                     path="device/xiaomi/ingres"
+                     remote="github"
+                     revision="lineage-22.2" />
+            <project name="LineageOS/android_device_xiaomi_sm8450-common"
+                     path="device/xiaomi/sm8450-common"
+                     remote="github"
+                     revision="lineage-22.2" />
+            <project name="LineageOS/android_kernel_xiaomi_sm8450"
+                     path="kernel/xiaomi/sm8450"
+                     remote="github"
+                     revision="lineage-22.2" />
+            <project name="TheMuppets/proprietary_vendor_xiaomi_ingres"
+                     path="vendor/xiaomi/ingres"
+                     remote="github"
+                     revision="lineage-22.2" />
+            <project name="WSIUHBERFG/vendor_extra"
+                     path="vendor/extra"
+                     remote="github"
+                     revision="main" />
+          </manifest>
+          EOF
+
+      - name: Sync sources
+        run: |
+          cd ~/android/lineage
+          repo sync -c -j$(nproc --all) \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags \
+            --optimized-fetch \
+            2>&1 | tail -50
+
+      - name: Download prebuilt APKs
+        run: |
+          cd ~/android/lineage/vendor/extra/prebuilt
+          # Telegram
+          curl -L "https://github.com/DrKLO/Telegram/releases/latest/download/app-arm64-v8a-release.apk" -o Telegram.apk || \
+          curl -L "https://t.me/tg_arm64" -o Telegram.apk || true
+
+          # YouTube (latest from apkmirror via direct link)
+          echo "Downloading YouTube..."
+          # Placeholder — нужно добавить прямую ссылку на APK
+          # curl -L "URL" -o YouTube.apk
+
+          echo "APK download step done (add direct links for each app)"
+          ls -lah *.apk 2>/dev/null || echo "No APKs downloaded yet"
+
+      - name: Apply patches
+        run: |
+          cd ~/android/lineage
+          bash vendor/extra/apply_patches.sh
+
+      - name: Include vendor_extra in build
+        run: |
+          echo '$(call inherit-product-if-exists, vendor/extra/vendor.mk)' \
+            >> ~/android/lineage/device/xiaomi/ingres/lineage_ingres.mk
+
+      - name: Set up environment and build
+        run: |
+          cd ~/android/lineage
+          export USE_CCACHE=1
+          export CCACHE_EXEC=$(which ccache)
+          export CCACHE_DIR=$HOME/.ccache
+          source build/envsetup.sh
+          breakfast ingres
+          croot
+          mka bacon -j$(nproc --all) 2>&1 | tee build.log | tail -100
+
+      - name: Upload ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: LineageOS-FE-22.2-ingres
+          path: |
+            ~/android/lineage/out/target/product/ingres/lineage-*.zip
+            ~/android/lineage/out/target/product/ingres/recovery.img
+            ~/android/lineage/out/target/product/ingres/boot.img
+          retention-days: 7
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ~/android/lineage/build.log
+          retention-days: 3
